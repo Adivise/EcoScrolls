@@ -9,16 +9,19 @@ import com.willfp.eco.core.placeholder.templates.DynamicPlaceholder
 import com.willfp.ecoscrolls.commands.CommandEcoScrolls
 import com.willfp.ecoscrolls.commands.CommandInscribe
 import com.willfp.ecoscrolls.config.TargetsYml
+import com.willfp.ecoscrolls.config.TypesYml
 import com.willfp.ecoscrolls.display.ScrollDisplay
 import com.willfp.ecoscrolls.gui.updateInscribeMenu
 import com.willfp.ecoscrolls.libreforge.ConditionHasScroll
 import com.willfp.ecoscrolls.libreforge.EffectInscribeItem
+import com.willfp.ecoscrolls.libreforge.EffectUninscribeItem
 import com.willfp.ecoscrolls.libreforge.FilterScroll
 import com.willfp.ecoscrolls.libreforge.TriggerInscribe
 import com.willfp.ecoscrolls.libreforge.TriggerTryInscribe
 import com.willfp.ecoscrolls.scrolls.InscriptionHandler
 import com.willfp.ecoscrolls.scrolls.ScrollLevel
 import com.willfp.ecoscrolls.scrolls.ScrollTag
+import com.willfp.ecoscrolls.scrolls.ScrollTypes
 import com.willfp.ecoscrolls.scrolls.Scrolls
 import com.willfp.ecoscrolls.target.ScrollFinder
 import com.willfp.ecoscrolls.target.Targets
@@ -42,6 +45,7 @@ internal lateinit var plugin: EcoScrollsPlugin
 
 class EcoScrollsPlugin : LibreforgePlugin() {
     val targetsYml: TargetsYml = TargetsYml(this)
+    val typesYml: TypesYml = TypesYml(this)
 
     val inscriptionHandler = InscriptionHandler(this)
 
@@ -52,6 +56,7 @@ class EcoScrollsPlugin : LibreforgePlugin() {
     override fun handleEnable() {
         Conditions.register(ConditionHasScroll)
         Effects.register(EffectInscribeItem)
+        Effects.register(EffectUninscribeItem)
         Filters.register(FilterScroll)
         Triggers.register(TriggerInscribe)
         Triggers.register(TriggerTryInscribe)
@@ -90,8 +95,10 @@ class EcoScrollsPlugin : LibreforgePlugin() {
 
     override fun handleReload() {
         updateInscribeMenu()
+        ScrollTypes.update()
         Targets.update()
         inscriptionHandler.reload()
+        ScrollDisplay.reload()
     }
 
     override fun loadConfigCategories(): List<ConfigCategory> {
