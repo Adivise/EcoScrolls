@@ -83,9 +83,9 @@ class InscriptionHandler(private val plugin: EcoScrollsPlugin) {
             return false
         }
 
-        val didInscribe = scroll.inscribe(item, player)
+        val attempt = scroll.attemptInscribe(item, player)
 
-        if (didInscribe) {
+        if (attempt.inscribed) {
             applyEffects.ifPresent {
                 it.trigger(inscriptionTrigger(item, scroll, player))
             }
@@ -101,31 +101,33 @@ class InscriptionHandler(private val plugin: EcoScrollsPlugin) {
             val denialReason = scroll.getDenialReason(item)
             val messageKey = if (denialReason != null) {
                 denialReason.messageKey
-            } else if (scroll.canAfford(item, player)) {
+            } else if (!scroll.canAfford(item, player)) {
+                "denied-cannot-afford"
+            } else if (attempt.hasConditionFeedback) {
                 null
             } else {
-                "denied-cannot-afford"
+                "denied-conditions"
             }
             if (messageKey != null) {
                 player.sendMessage(plugin.langYml.getMessage(messageKey))
             }
         }
 
-        return didInscribe
+        return attempt.inscribed
     }
 
+    fun getBaseScrollLimit(item: ItemStack): Int = item.scrollLimitBase
+        ?: min(item.targets.mapNotNull { it.scrollLimit }.minOrNull() ?: UNLIMITED, globalScrollLimit)
+
     fun getScrollLimit(item: ItemStack): Int {
-        val targets = item.targets
+        val base = getBaseScrollLimit(item)
 
-        var highest = Int.MAX_VALUE
-
-        for (target in targets) {
-            val limit = target.scrollLimit ?: continue
-            if (limit < highest) {
-                highest = limit
-            }
+        return if (base == UNLIMITED) {
+            UNLIMITED
+        } else {
+            (base.toLong() + item.scrollLimitBonus)
+                .coerceIn(minimumValue = 0L, maximumValue = UNLIMITED.toLong())
+                .toInt()
         }
-
-        return min(highest, globalScrollLimit)
     }
 }

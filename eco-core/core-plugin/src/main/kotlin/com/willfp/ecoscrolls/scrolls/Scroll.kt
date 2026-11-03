@@ -22,7 +22,9 @@ import com.willfp.eco.util.formatEcoRich
 import com.willfp.eco.util.toNumeral
 import com.willfp.ecoscrolls.plugin
 import com.willfp.ecoscrolls.target.Targets
+import com.willfp.libreforge.ItemProvidedHolder
 import com.willfp.libreforge.ViolationContext
+import com.willfp.libreforge.conditions.ConditionBlock
 import com.willfp.libreforge.conditions.Conditions
 import com.willfp.libreforge.effects.Effects
 import com.willfp.libreforge.toDispatcher
@@ -57,6 +59,8 @@ class Scroll(
     val maxLevel = config.getInt("max-level")
 
     val maxUses = config.getInt("max-uses")
+
+    val levelsPerLimit: Int? = config.getIntOrNull("levels-per-limit")
 
     val type: ScrollType? = config.getStringOrNull("type")?.let { ScrollTypes[it] }
 
@@ -225,6 +229,9 @@ class Scroll(
 
     fun canInscribe(itemStack: ItemStack): Boolean = getDenialReason(itemStack) == null
 
+    fun canInscribe(itemStack: ItemStack, player: Player): Boolean =
+        canInscribe(itemStack) && getNotMetInscriptionConditions(itemStack, player).isEmpty()
+
     fun matchesTarget(itemStack: ItemStack): Boolean = targets.any { it.matches(itemStack) }
 
     fun getDenialReason(itemStack: ItemStack): InscriptionDenialReason? {
@@ -233,8 +240,9 @@ class Scroll(
         }
 
         val currentScrolls = itemStack.scrolls
+        val level = itemStack.getScrollLevel(this)?.level ?: 0
 
-        if (currentScrolls.size >= plugin.inscriptionHandler.getScrollLimit(itemStack)) {
+        if (level < maxLevel && exceedsScrollLimit(itemStack, level)) {
             return InscriptionDenialReason.GLOBAL_LIMIT
         }
 
@@ -254,7 +262,6 @@ class Scroll(
             }
         }
 
-        val level = itemStack.getScrollLevel(this)?.level ?: 0
         if (level >= maxLevel) {
             return InscriptionDenialReason.MAX_LEVEL
         }
@@ -262,28 +269,59 @@ class Scroll(
         return null
     }
 
+    private fun exceedsScrollLimit(itemStack: ItemStack, level: Int): Boolean {
+        val addedCost = limitCost(level + 1) - limitCost(level)
+        val limit = plugin.inscriptionHandler.getScrollLimit(itemStack)
+
+        return addedCost > 0 && limit != UNLIMITED && itemStack.usedScrollLimit + addedCost > limit
+    }
+
+    fun limitCost(level: Int): Int = when {
+        level <= 0 -> 0
+        levelsPerLimit == null -> 1
+        levelsPerLimit <= 0 -> 0
+        else -> 1 + (level - 1) / levelsPerLimit
+    }
+
     fun canAfford(itemStack: ItemStack, player: Player): Boolean =
         inscriptionPrice.canAfford(player, getPriceMultiplier(itemStack))
 
-    fun inscribe(itemStack: ItemStack, player: Player): Boolean {
+    internal fun inscriptionHolder(itemStack: ItemStack): ItemProvidedHolder =
+        ItemProvidedHolder(getLevel((itemStack.getScrollLevel(this)?.level ?: 0) + 1), itemStack)
+
+    internal fun getNotMetInscriptionConditions(itemStack: ItemStack, player: Player): List<ConditionBlock<*>> =
+        inscriptionConditions.filterNot { it.isMet(player.toDispatcher(), inscriptionHolder(itemStack)) }
+
+    fun inscribe(itemStack: ItemStack, player: Player): Boolean =
+        attemptInscribe(itemStack, player).inscribed
+
+    internal fun attemptInscribe(itemStack: ItemStack, player: Player): InscriptionAttempt {
         if (!canInscribe(itemStack)) {
-            return false
+            return InscriptionAttempt(false)
         }
 
-        if (!inscriptionConditions.areMetAndTrigger(
-                TriggerData(
-                    player = player,
-                    item = itemStack
-                ).dispatch(player.toDispatcher())
-            )
-        ) {
-            return false
-        }
+        val notMetConditions = getNotMetInscriptionConditions(itemStack, player)
 
-        if (!canAfford(itemStack, player)) {
-            return false
-        }
+        return when {
+            notMetConditions.isNotEmpty() -> {
+                TriggerData(player = player, item = itemStack)
+                    .dispatch(player.toDispatcher())
+                    .let { trigger -> notMetConditions.forEach { it.notMetEffects?.trigger(trigger) } }
+                InscriptionAttempt(false, notMetConditions)
+            }
 
+            !canAfford(itemStack, player) -> {
+                InscriptionAttempt(false)
+            }
+
+            else -> {
+                completeInscription(itemStack, player)
+                InscriptionAttempt(true)
+            }
+        }
+    }
+
+    private fun completeInscription(itemStack: ItemStack, player: Player) {
         inscriptionPrice.pay(player, getPriceMultiplier(itemStack))
 
         inscribe(itemStack)
@@ -298,8 +336,6 @@ class Scroll(
         )
 
         PlayableSound.create(plugin.configYml.getSubsection("sounds.inscribe"))?.playTo(player)
-
-        return true
     }
 
     fun inscribe(itemStack: ItemStack) {
